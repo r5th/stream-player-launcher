@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Open Stream in Player</title>
+  <style>
+    :root {
+      --bg: #0d0f14;
+      --card: #161a23;
+      --border: #252b3b;
+      --text: #f3f5f9;
+      --muted: #98a2b3;
+      --accent: #4f8cff;
+      --accent-soft: rgba(79, 140, 255, 0.14);
+      --warn-bg: rgba(245, 158, 11, 0.12);
+      --warn-border: rgba(245, 158, 11, 0.5);
+      --ok: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100svh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.18rem;
+      line-height: 1.3;
+    }
+    .sub {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+    .fallback {
+      display: none;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    .fallback.show { display: block; }
+    .fallback a {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .players {
+      display: grid;
+      gap: 10px;
+    }
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 13px 15px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #1d2230;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.96rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn.primary {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+    }
+    .btn span.hint {
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .toast {
+      margin-top: 12px;
+      font-size: 0.86rem;
+      color: var(--ok);
+      min-height: 1.2em;
+    }
+    .err {
+      color: #f87171;
+      font-size: 0.92rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1 id="title">Open Stream</h1>
+    <p class="sub" id="subtitle">Choose your video player on iPhone or iPad. Stream URL stays private in your browser.</p>
+    <div id="fallback" class="fallback"></div>
+    <div id="content"></div>
+    <div class="toast" id="toast"></div>
+  </main>
+
+  <script>
+    (function () {
+      const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+      const params = new URLSearchParams(hash);
+      const streamUrl = params.get("url");
+      const title = params.get("title") || "Stream";
+      const requestedPlayer = (params.get("player") || "").toLowerCase();
+      const autoLaunch = params.get("auto") === "1";
+
+      const titleEl = document.getElementById("title");
+      const contentEl = document.getElementById("content");
+      const fallbackEl = document.getElementById("fallback");
+      const toastEl = document.getElementById("toast");
+
+      titleEl.textContent = title;
+
+      if (!streamUrl || !/^https?:\/\//i.test(streamUrl)) {
+        contentEl.innerHTML = '<p class="err">Missing or invalid stream URL.</p>';
+        return;
+      }
+
+      const enc = encodeURIComponent(streamUrl);
+      const players = [
+        {
+          id: "outplayer",
+          name: "Outplayer",
+          hint: "Free · Best on iOS",
+          href: "outplayer://" + streamUrl,
+          storeUrl: "https://apps.apple.com/app/outplayer/id1449923287"
+        },
+        {
+          id: "vlc",
+          name: "VLC",
+          hint: "Free · Plays everything",
+          href: "vlc-x-callback://x-callback-url/stream?url=" + enc,
+          storeUrl: "https://apps.apple.com/app/vlc-media-player/id650377962"
+        },
+        {
+          id: "infuse",
+          name: "Infuse",
+          hint: "Dolby Vision / Atmos",
+          href: "infuse://x-callback-url/play?url=" + enc,
+          storeUrl: "https://apps.apple.com/app/infuse-video-player/id1136220934"
+        },
+        {
+          id: "browser",
+          name: "Safari / Browser",
+          hint: "Direct HTTPS",
+          href: streamUrl,
+          storeUrl: null
+        }
+      ];
+
+      let fallbackTimer = null;
+      let leftPage = false;
+
+      function markLeft() {
+        leftPage = true;
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+      }
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) markLeft();
+      });
+      window.addEventListener("pagehide", markLeft);
+
+      function showInstallFallback(player) {
+        if (!player.storeUrl) return;
+        fallbackEl.innerHTML =
+          "<strong>" + player.name + " didn't open?</strong><br>" +
+          "If it isn't installed on your iPhone yet, install it free from the App Store (or pick another player below):<br>" +
+          '<a href="' + player.storeUrl + '">Install ' + player.name + " on App Store</a>";
+        fallbackEl.classList.add("show");
+      }
+
+      function launchPlayer(player) {
+        leftPage = false;
+        fallbackEl.classList.remove("show");
+        toastEl.textContent = "Opening " + player.name + "…";
+        localStorage.setItem("preferred_player", player.id);
+
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        if (player.storeUrl) {
+          fallbackTimer = setTimeout(function () {
+            if (!leftPage && !document.hidden) {
+              toastEl.textContent = "";
+              showInstallFallback(player);
+            }
+          }, 1600);
+        }
+        window.location.href = player.href;
+      }
+
+      const highlightId = requestedPlayer || localStorage.getItem("preferred_player") || "outplayer";
+      const list = document.createElement("div");
+      list.className = "players";
+
+      players.forEach(function (p) {
+        const a = document.createElement("a");
+        a.className = "btn" + (p.id === highlightId ? " primary" : "");
+        a.href = p.href;
+        a.innerHTML = "<span>" + p.name + '</span><span class="hint">' + p.hint + "</span>";
+        a.addEventListener("click", function (ev) {
+          if (p.storeUrl) {
+            ev.preventDefault();
+            launchPlayer(p);
+          }
+        });
+        list.appendChild(a);
+      });
+
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "btn";
+      copyBtn.type = "button";
+      copyBtn.innerHTML = '<span>Copy Stream URL</span><span class="hint">Clipboard</span>';
+      copyBtn.addEventListener("click", async function () {
+        try {
+          await navigator.clipboard.writeText(streamUrl);
+          toastEl.textContent = "Copied stream URL to clipboard.";
+        } catch (e) {
+          prompt("Copy stream URL:", streamUrl);
+        }
+      });
+      list.appendChild(copyBtn);
+      contentEl.appendChild(list);
+
+      if (autoLaunch && requestedPlayer) {
+        const target = players.find(function (p) { return p.id === requestedPlayer; });
+        if (target) {
+          launchPlayer(target);
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
